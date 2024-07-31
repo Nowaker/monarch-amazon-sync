@@ -80,7 +80,7 @@ export function Options() {
           <Label htmlFor="costcoMerchant" value="What merchant is Costco in Monarch?" />
         </div>
         <TextInput
-          defaultValue={options?.walmartMerchant}
+          defaultValue={options?.costcoMerchant}
           className="pb-3"
           type="text"
           id="costcoMerchant"

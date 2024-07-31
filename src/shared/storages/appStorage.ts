@@ -77,6 +77,7 @@ type State = {
   lastMonarchAuth: number;
   lastSync: LastSync | undefined;
   options: Options;
+  providerData: Record<string, any>;
 };
 
 const appStorage = createStorage<State>(
@@ -104,6 +105,7 @@ const appStorage = createStorage<State>(
       transactionMatchingWindowInDays: 7,
       maxPages: Infinity,
     },
+    providerData: {},
   },
   {
     storageType: StorageType.Local,

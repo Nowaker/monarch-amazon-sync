@@ -10,14 +10,14 @@ export type ProviderInfo = {
   startingYear?: number;
 };
 
-export enum Provider {
-  Amazon = 'amazon',
-  Walmart = 'walmart',
-  Costco = 'costco',
-}
+// export enum Provider {
+//   Amazon = 'amazon',
+//   Walmart = 'walmart',
+//   Costco = 'costco',
+// }
 
 export type Order = {
-  provider: Provider;
+  // provider: Provider;
   id: string;
   date: string;
   transactions?: OrderTransaction[];
@@ -25,7 +25,7 @@ export type Order = {
 };
 
 export type Item = {
-  provider: Provider;
+  // provider: Provider;
   orderId: string;
   title: string;
   price: number;
@@ -33,7 +33,7 @@ export type Item = {
 };
 
 export type OrderTransaction = {
-  provider: Provider;
+  // provider: Provider;
   id: string;
   amount: number;
   date: string;

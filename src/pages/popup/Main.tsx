@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, ToggleSwitch } from 'flowbite-react';
 import progressStorage, { ProgressPhase } from '@root/src/shared/storages/progressStorage';
 import useStorage from '@root/src/shared/hooks/useStorage';
-import { checkAuth } from '@root/src/shared/api/amazonApi';
+import { checkAuth as checkAmazonAuth } from '@root/src/shared/api/amazonApi';
+import { checkAuth as checkCostcoAuth } from '@root/src/shared/api/costcoApi';
+import { checkAuth as checkWalmartAuth } from '@root/src/shared/api/walmartApi';
 import appStorage, { AuthStatus } from '@root/src/shared/storages/appStorage';
 import ProgressIndicator from './components/ProgressIndicator';
 import withErrorBoundary from '@root/src/shared/hoc/withErrorBoundary';
@@ -11,17 +13,65 @@ import ConnectionInfo, { ConnectionStatus } from './components/ConnectionInfo';
 import { useAlarm } from '@root/src/shared/hooks/useAlarm';
 import { Action } from '@root/src/shared/types';
 
+
 const Main = () => {
   const progress = useStorage(progressStorage);
   const appData = useStorage(appStorage);
   const syncAlarm = useAlarm('sync-alarm');
+
+  const providers = [
+    new Provider(
+      'Amazon connection',
+      appData.lastAmazonAuth,
+      appData.amazonStatus,
+      checkAmazonAuth,
+      (status, lastAuth, startingYear) => appStorage.patch({
+        amazonStatus: status,
+        lastAmazonAuth: lastAuth,
+        oldestAmazonYear: startingYear
+      }),
+      {
+        notLoggedIn: 'Log in to Amazon and try again.',
+        failure: 'Failed to connect to Amazon. Ensure the extension has been granted access.'
+      }
+    ),
+    new Provider(
+      'Costco connection',
+      appData.lastCostcoAuth,
+      appData.costcoStatus,
+      checkCostcoAuth,
+      (status, lastAuth, startingYear) => appStorage.patch({
+        costcoStatus: status,
+        lastCostcoAuth: lastAuth,
+        oldestCostcoYear: startingYear
+      }),
+      {
+        notLoggedIn: 'Log in to Costco and try again.',
+        failure: 'Failed to connect to Costco. Ensure the extension has been granted access.'
+      }
+    ),
+    new Provider(
+      'Walmart connection',
+      appData.lastWalmartAuth,
+      appData.walmartStatus,
+      checkWalmartAuth,
+      (status, lastAuth, startingYear) => appStorage.patch({
+        walmartStatus: status,
+        lastWalmartAuth: lastAuth,
+        oldestWalmartYear: startingYear
+      }),
+      {
+        notLoggedIn: 'Log in to Walmart and try again.',
+        failure: 'Failed to connect to Walmart. Ensure the extension has been granted access.'
+      }
+    )
+  ];
 
   const actionOngoing = useMemo(
     () => progress.phase !== ProgressPhase.Complete && progress.phase !== ProgressPhase.Idle,
     [progress],
   );
 
-  // If the action is ongoing for more than 15 seconds, we assume it's stuck and mark it as complete
   useEffect(() => {
     if (actionOngoing) {
       const originalComplete = progress.complete;
@@ -39,35 +89,31 @@ const Main = () => {
     }
   }, [actionOngoing, progress.complete, progress.phase]);
 
-  const [checkedAmazon, setCheckedAmazon] = useState(false);
+  const [checkedProviders, setCheckedProviders] = useState<Record<string, boolean>>({});
 
-  // Check if we need to re-authenticate with Amazon
   useEffect(() => {
-    if (
-      (appData.amazonStatus === AuthStatus.Success &&
-        new Date(appData.lastAmazonAuth).getTime() > Date.now() - 1000 * 60 * 60 * 24) ||
-      checkedAmazon
-    ) {
-      return;
-    }
-    setCheckedAmazon(true);
-    appStorage.patch({ amazonStatus: AuthStatus.Pending }).then(() => {
-      checkAuth().then(amazon => {
-        if (amazon.status === AuthStatus.Success) {
-          appStorage.patch({
-            amazonStatus: AuthStatus.Success,
-            lastAmazonAuth: Date.now(),
-            oldestAmazonYear: amazon.startingYear,
-          });
-        } else {
-          appStorage.patch({ amazonStatus: amazon.status });
-        }
+    providers.forEach(provider => {
+      if (
+        (provider.status === AuthStatus.Success &&
+          new Date(provider.lastUpdated).getTime() > Date.now() - 1000 * 60 * 60 * 24) ||
+        checkedProviders[provider.name]
+      ) {
+        return;
+      }
+      setCheckedProviders(prev => ({ ...prev, [provider.name]: true }));
+      appStorage.patch({ [`${provider.name.toLowerCase().split(' ')[0]}Status`]: AuthStatus.Pending }).then(() => {
+        provider.checkAuth().then(response => {
+          if (response.status === AuthStatus.Success) {
+            provider.updateStatus(AuthStatus.Success, Date.now(), response.startingYear);
+          } else {
+            provider.updateStatus(response.status, Date.now());
+          }
+        });
       });
     });
-  }, [appData.amazonStatus, appData.lastAmazonAuth, checkedAmazon]);
+  }, [checkedProviders, providers]);
 
-  const ready =
-    appData.amazonStatus === AuthStatus.Success && appData.monarchStatus === AuthStatus.Success && !actionOngoing;
+  const ready = providers.every(provider => provider.status === AuthStatus.Success) && !actionOngoing;
 
   const forceSync = useCallback(async () => {
     if (!ready) return;
@@ -78,36 +124,27 @@ const Main = () => {
   return (
     <div className="flex flex-col flex-grow">
       <div className="ml-2">
-        <ConnectionInfo
-          name="Amazon connection"
-          lastUpdated={appData.lastAmazonAuth}
-          status={
-            appData.amazonStatus === AuthStatus.Pending
-              ? ConnectionStatus.Loading
-              : appData.amazonStatus === AuthStatus.Success
-                ? ConnectionStatus.Success
-                : ConnectionStatus.Error
-          }
-          message={
-            appData.amazonStatus === AuthStatus.NotLoggedIn
-              ? 'Log in to Amazon and try again.'
-              : appData.amazonStatus === AuthStatus.Failure
-                ? 'Failed to connect to Amazon. Ensure the extension has been granted access.'
-                : undefined
-          }
-        />
-        <ConnectionInfo
-          name="Monarch connection"
-          lastUpdated={appData.lastMonarchAuth}
-          status={appData.monarchStatus === AuthStatus.Success ? ConnectionStatus.Success : ConnectionStatus.Error}
-          message={
-            appData.monarchStatus === AuthStatus.NotLoggedIn
-              ? 'Open Monarch and log in to enable syncing.'
-              : appData.monarchStatus === AuthStatus.Failure
-                ? 'Log in to Monarch and try again.'
-                : undefined
-          }
-        />
+        {providers.map(provider => (
+          <ConnectionInfo
+            key={provider.name}
+            name={provider.name}
+            lastUpdated={provider.lastUpdated}
+            status={
+              provider.status === AuthStatus.Pending
+                ? ConnectionStatus.Loading
+                : provider.status === AuthStatus.Success
+                  ? ConnectionStatus.Success
+                  : ConnectionStatus.Error
+            }
+            message={
+              provider.status === AuthStatus.NotLoggedIn
+                ? provider.statusMessages.notLoggedIn
+                : provider.status === AuthStatus.Failure
+                  ? provider.statusMessages.failure
+                  : undefined
+            }
+          />
+        ))}
       </div>
 
       <div className="flex flex-col flex-grow items-center justify-center">
